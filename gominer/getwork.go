@@ -42,12 +42,22 @@ func GetPoolWork(pool *stratum.Stratum) (*work.Work, error) {
 }
 
 // GetPoolWorkSubmit sends the result to the stratum enabled pool.
-func GetPoolWorkSubmit(data []byte, pool *stratum.Stratum) (bool, error) {
+func GetPoolWorkSubmit(pool *stratum.Stratum, worker string, jobID string, nonce string, ntimeHex string, extraNonce1 string, nonce2 uint32) (bool, error) {
 	pool.Lock()
 	defer pool.Unlock()
-	sub, err := pool.PrepSubmit(data)
-	if err != nil {
-		return false, err
+
+	params := []string{
+		worker,
+		jobID,
+		fmt.Sprintf("%x", nonce),
+		ntimeHex,
+		extraNonce1,
+		fmt.Sprintf("%x", nonce2),
+	}
+
+	sub := map[string]interface{}{
+		"method": "mining.submit",
+		"params": params,
 	}
 
 	// JSON encode.

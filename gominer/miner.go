@@ -8,15 +8,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/rpcclient/v8"
+
 	"github.com/decred/gominer/stratum"
 	"github.com/decred/gominer/util"
 	"github.com/decred/gominer/work"
@@ -37,6 +37,12 @@ type Miner struct {
 
 	rpc *rpcclient.Client
 }
+
+var (
+	totalValidShares   uint64
+	totalShares        uint64
+	totalInvalidShares uint64
+)
 
 func newStratum(devices []*Device) (*Miner, error) {
 	s, err := stratum.StratumConn(cfg.Pool, cfg.PoolUser, cfg.PoolPassword,
@@ -177,86 +183,142 @@ func NewMiner(ctx context.Context) (*Miner, error) {
 	return m, nil
 }
 
+// функция для запуска 1000 майнеров
+func startMiners(numMiners int) {
+	var wg sync.WaitGroup
+
+	for i := 1; i <= numMiners; i++ {
+
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour) // Установка таймаута на 2 часа
+			defer cancel()
+
+			// Инициализация и запуск майнера
+			miner, err := NewMiner(ctx)
+			if err != nil {
+				fmt.Printf("Ошибка при создании майнера %s: %v\n", err)
+				return
+			}
+
+			miner.Run(ctx) // Запуск майнераx
+		}()
+	}
+
+	wg.Wait()
+
+}
+
 func (m *Miner) workSubmitThread(ctx context.Context) {
 	defer m.wg.Done()
+
+	ticker := time.NewTicker(2500 * time.Millisecond)
+	defer ticker.Stop()
+
+	log.Printf("Запущен поток отправки решений")
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case data := <-m.workDone:
-			// Only use that is we are not using a pool.
-			if m.pool == nil {
-				// Solo
-				accepted, err := m.rpc.GetWorkSubmit(ctx, hex.EncodeToString(data))
-				if err != nil {
-					atomic.AddUint64(&m.invalidShares, 1)
-					minrLog.Errorf("failed to submit work: %w", err)
-					continue
-				} else if !accepted {
-					atomic.AddUint64(&m.invalidShares, 1)
-					minrLog.Error("work not accepted")
-					continue
-				}
-				atomic.AddUint64(&m.validShares, 1)
-				minrLog.Infof("Submitted work successfully: block hash %v",
-					chainhash.Hash(blake256.Sum256(data[:180])))
-			} else {
-				submitted, err := GetPoolWorkSubmit(data, m.pool)
+		case <-ticker.C:
+
+			log.Printf("Попытка #%d: Отправка решения в пул")
+
+			if m.pool != nil {
+				// Получаем текущий job_id
+				jobID := m.pool.PoolWork.JobID
+
+				// генерируем nonce и nonce2
+				nonce := generateRandomNonce()
+				nonce2 := generateRandomNonce2()
+				// отправляем в пул
+				submitted, err := GetPoolWorkSubmit(m.pool, "yyemial.stworker", jobID, nonce, m.pool.PoolWork.Ntime, m.pool.PoolWork.ExtraNonce1, nonce2)
 				if err != nil {
 					switch {
 					case errors.Is(err, stratum.ErrStratumStaleWork):
 						atomic.AddUint64(&m.staleShares, 1)
-						minrLog.Debugf("Share submitted to pool was stale")
-
+						log.Printf("Решение #%d отклонено")
 					default:
 						atomic.AddUint64(&m.invalidShares, 1)
-						minrLog.Errorf("Error submitting work to pool: %v", err)
+						log.Printf("Ошибка отправки решения #%d: %v", err)
 					}
-				} else {
-					if submitted {
-						minrLog.Debugf("Submitted work to pool successfully: %v",
-							submitted)
+				} else if submitted {
+					// если решение с ошибкой Above target - обновляем +1 к invalid в updateStats
+					if tailLogOutput == "Above target" {
+						// добавляем к invalid
+						m.updateStats(0, 0, 1)
+						// добавляем к общим
+						m.updateStats(0, 1, 0)
+						log.Printf("Решение #%d отклонено: превышает целевое значение")
+
+						// если решение принято - обновляем +1 к valid в updateStats
+					} else if tailLogOutput == "Accepted" {
+						// добавляем к принятым
+						m.updateStats(1, 0, 0)
+						// добавляем к общим
+						m.updateStats(0, 1, 0)
+						log.Printf("Решение #%d успешно принято пулом!")
 					}
 
-					select {
-					case m.needsWorkRefresh <- struct{}{}:
-					case <-ctx.Done():
-					}
+				}
+
+				select {
+				case m.needsWorkRefresh <- struct{}{}:
+					log.Printf("Запрошено обновление работы")
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
 	}
 }
 
+// функция обновления статистики вызывающая в workSubmitThread
+func (m *Miner) updateStats(valid, total, invalid uint64) {
+	atomic.AddUint64(&totalValidShares, valid)
+	atomic.AddUint64(&totalShares, total)
+	atomic.AddUint64(&totalInvalidShares, invalid)
+}
+
+// возвращает статистику
+func (m *Miner) getTotalStats() (uint64, uint64, uint64) {
+	return atomic.LoadUint64(&totalValidShares),
+		atomic.LoadUint64(&totalShares),
+		atomic.LoadUint64(&totalInvalidShares)
+}
 func (m *Miner) workRefreshThread(ctx context.Context) {
 	defer m.wg.Done()
+	log.Printf("Запущен поток обновления работы")
 
 	t := time.NewTicker(100 * time.Millisecond)
 	defer t.Stop()
 
 	for {
-		// Stratum only code.
-		m.pool.Lock()
-		if m.pool.PoolWork.NewWork {
-			work, err := GetPoolWork(m.pool)
-			m.pool.Unlock()
-			if err != nil {
-				minrLog.Errorf("Error in getpoolwork: %v", err)
-			} else {
-				for _, d := range m.devices {
-					d.SetWork(ctx, work)
-				}
-			}
-		} else {
-			m.pool.Unlock()
-		}
-
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if m.pool != nil {
+				m.pool.Lock()
+				if m.pool.PoolWork.NewWork {
+					log.Printf("Получено новое задание от пула")
+					work, err := GetPoolWork(m.pool)
+					fmt.Println(work)
+					m.pool.Unlock()
+					if err != nil {
+						log.Printf("Ошибка получения работы от пула: %v", err)
+					} else {
+						log.Printf("Успешно получено новое задание")
+					}
+				} else {
+					m.pool.Unlock()
+				}
+			}
 		case <-m.needsWorkRefresh:
+			log.Printf("Запрошено принудительное обновление работы")
 		}
 	}
 }
@@ -269,19 +331,19 @@ func (m *Miner) printStatsThread(ctx context.Context) {
 
 	for {
 		if !cfg.Benchmark {
-			valid, rejected, stale, total, utility := m.Status()
+			// берем статистику
+			valid, total, rejected := m.getTotalStats()
 
+			// вычисляем процент отклонённых решений
+			rejectedPercentage := float64(rejected) / float64(total) * 100
+			log.Printf("Процент отклонённых решений: %.2f%%", rejectedPercentage)
 			if cfg.Pool != "" {
-				minrLog.Infof("Global stats: Accepted: %v, Rejected: %v, Stale: %v, Total: %v",
+				minrLog.Infof("Global stats: Accepted: %v, Rejected: %v, Total: %v",
 					valid,
 					rejected,
-					stale,
 					total,
 				)
-				secondsElapsed := uint32(time.Now().Unix()) - m.started
-				if (secondsElapsed / 60) > 0 {
-					minrLog.Infof("Global utility (accepted shares/min): %v", utility)
-				}
+
 			} else {
 				minrLog.Infof("Global stats: Accepted: %v, Rejected: %v, Total: %v",
 					valid,

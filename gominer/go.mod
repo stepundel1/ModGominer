@@ -8,6 +8,7 @@ require (
 	github.com/decred/dcrd/blockchain/standalone/v2 v2.2.0
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.4
 	github.com/decred/dcrd/chaincfg/v3 v3.2.0
+	github.com/decred/dcrd/crypto/blake256 v1.0.1
 	github.com/decred/dcrd/dcrutil/v4 v4.0.1
 	github.com/decred/dcrd/rpcclient/v8 v8.0.0
 	github.com/decred/dcrd/wire v1.6.0
@@ -15,6 +16,8 @@ require (
 	github.com/decred/slog v1.2.0
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/jrick/logrotate v1.0.0
+	golang.org/x/crypto v0.30.0
+	golang.org/x/term v0.27.0
 )
 
 require (
@@ -22,7 +25,6 @@ require (
 	github.com/dchest/siphash v1.2.3 // indirect
 	github.com/decred/base58 v1.0.5 // indirect
 	github.com/decred/dcrd/blockchain/stake/v5 v5.0.0 // indirect
-	github.com/decred/dcrd/crypto/blake256 v1.0.1 // indirect
 	github.com/decred/dcrd/crypto/ripemd160 v1.0.2 // indirect
 	github.com/decred/dcrd/database/v3 v3.0.1 // indirect
 	github.com/decred/dcrd/dcrec v1.0.1 // indirect
@@ -34,6 +36,6 @@ require (
 	github.com/decred/dcrd/txscript/v4 v4.1.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
-	golang.org/x/sys v0.0.0-20210320140829-1e4c9ba3b0c4 // indirect
+	golang.org/x/sys v0.28.0 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 )

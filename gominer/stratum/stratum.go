@@ -400,29 +400,29 @@ func (s *Stratum) handleStratumMsg(resp interface{}) {
 func (s *Stratum) handleNotifyRes(resp interface{}) {
 	s.Lock()
 	defer s.Unlock()
-	nResp := resp.(NotifyRes)
-	s.PoolWork.JobID = nResp.JobID
-	s.PoolWork.CB1 = nResp.GenTX1
-	heightHex := nResp.GenTX1[186:188] + nResp.GenTX1[184:186]
-	height, err := strconv.ParseInt(heightHex, 16, 32)
-	if err != nil {
-		log.Debugf("failed to parse height %v", err)
-		height = 0
+	// Преобразуем в NotifyRes
+	nResp, ok := resp.(NotifyRes)
+	if !ok {
+		log.Error("failed to cast response to NotifyRes")
+		return
 	}
-
-	s.PoolWork.Height = height
+	// обновляем данные
+	s.PoolWork.JobID = nResp.JobID
 	s.PoolWork.Hash = nResp.Hash
 	s.PoolWork.Nbits = nResp.Nbits
 	s.PoolWork.Version = nResp.BlockVersion
+
+	// Преобразуем Ntime
 	parsedNtime, err := strconv.ParseInt(nResp.Ntime, 16, 64)
 	if err != nil {
-		log.Error(err)
+		log.Error("failed to parse Ntime:", err)
 	}
 
 	s.PoolWork.Ntime = nResp.Ntime
 	s.PoolWork.NtimeDelta = parsedNtime - time.Now().Unix()
 	s.PoolWork.Clean = nResp.CleanJobs
 	s.PoolWork.NewWork = true
+
 	log.Trace("notify: ", spew.Sdump(nResp))
 }
 
